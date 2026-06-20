@@ -62,6 +62,8 @@ def init_db():
                     resources_scanned INTEGER DEFAULT 0,
                     issues_found INTEGER DEFAULT 0,
                     estimated_savings VARCHAR(100) DEFAULT '',
+                    predicted_monthly_spend NUMERIC DEFAULT 0.0,
+                    actual_monthly_spend NUMERIC DEFAULT 0.0,
                     analysis_result JSONB,
                     status VARCHAR(20) DEFAULT 'pending',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -72,6 +74,16 @@ def init_db():
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_analyses_created_at ON analyses(created_at DESC);
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS spend_history (
+                    id SERIAL PRIMARY KEY,
+                    account_id VARCHAR(50) NOT NULL,
+                    date DATE NOT NULL,
+                    actual_spend NUMERIC NOT NULL,
+                    predicted_spend NUMERIC DEFAULT 0.0,
+                    UNIQUE(account_id, date)
+                );
             """)
         conn.commit()
     logger.info("Database tables initialized")
@@ -126,6 +138,8 @@ def update_analysis(
     issues_found: int,
     estimated_savings: str,
     analysis_result: dict,
+    predicted_monthly_spend: float = 0.0,
+    actual_monthly_spend: float = 0.0,
     status: str = "completed",
 ):
     """Update an analysis record with results."""
@@ -136,6 +150,8 @@ def update_analysis(
                    SET resources_scanned = %s,
                        issues_found = %s,
                        estimated_savings = %s,
+                       predicted_monthly_spend = %s,
+                       actual_monthly_spend = %s,
                        analysis_result = %s,
                        status = %s
                    WHERE id = %s""",
@@ -143,6 +159,8 @@ def update_analysis(
                     resources_scanned,
                     issues_found,
                     estimated_savings,
+                    predicted_monthly_spend,
+                    actual_monthly_spend,
                     Jsonb(analysis_result),
                     status,
                     analysis_id,
@@ -157,7 +175,7 @@ def get_user_analyses(user_id: int, limit: int = 50) -> list[dict]:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """SELECT id, region, resources_scanned, issues_found,
-                          estimated_savings, status, created_at
+                          estimated_savings, predicted_monthly_spend, actual_monthly_spend, status, created_at
                    FROM analyses
                    WHERE user_id = %s
                    ORDER BY created_at DESC
@@ -173,7 +191,7 @@ def get_analysis_by_id(analysis_id: int, user_id: int) -> dict | None:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """SELECT id, region, resources_scanned, issues_found,
-                          estimated_savings, analysis_result, status, created_at
+                          estimated_savings, predicted_monthly_spend, actual_monthly_spend, analysis_result, status, created_at
                    FROM analyses
                    WHERE id = %s AND user_id = %s""",
                 (analysis_id, user_id),
@@ -189,3 +207,72 @@ def close_pool():
         _pool.close()
         _pool = None
         logger.info("Database connection pool closed")
+
+# ─── Spend History operations ───
+
+def add_spend_history(account_id: str, date_str: str, actual_spend: float, predicted_spend: float = 0.0):
+    """Insert or update daily spend history."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO spend_history (account_id, date, actual_spend, predicted_spend)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (account_id, date) 
+                   DO UPDATE SET actual_spend = EXCLUDED.actual_spend,
+                                 predicted_spend = EXCLUDED.predicted_spend""",
+                (account_id, date_str, actual_spend, predicted_spend)
+            )
+        conn.commit()
+
+def get_spend_history(account_id: str, limit: int = 30) -> list[dict]:
+    """Fetch spend history for plotting drift."""
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """SELECT date, actual_spend, predicted_spend
+                   FROM spend_history
+                   WHERE account_id = %s
+                   ORDER BY date ASC
+                   LIMIT %s""",
+                (account_id, limit)
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+def get_dashboard_stats(user_id: int) -> dict:
+    """Fetch aggregated stats for the dashboard."""
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            # Total resources scanned
+            cur.execute("SELECT SUM(resources_scanned) as total_resources FROM analyses WHERE user_id = %s", (user_id,))
+            res_row = cur.fetchone()
+            total_resources = res_row["total_resources"] if res_row and res_row["total_resources"] else 0
+            
+            # Fetch all savings to parse
+            cur.execute("SELECT estimated_savings FROM analyses WHERE user_id = %s", (user_id,))
+            savings_rows = cur.fetchall()
+            
+            total_savings = 0.0
+            for row in savings_rows:
+                s = row["estimated_savings"]
+                if s and "$" in s:
+                    try:
+                        # naive parse of "$100" or "$100-$200"
+                        parts = s.split("$")
+                        if len(parts) > 1:
+                            val = parts[1].split("-")[0].strip()
+                            # remove non numeric except dot
+                            val = "".join(c for c in val if c.isdigit() or c == '.')
+                            total_savings += float(val)
+                    except:
+                        pass
+            
+            # Fetch latest actual spend
+            cur.execute("SELECT actual_spend FROM spend_history ORDER BY date DESC LIMIT 1")
+            spend_row = cur.fetchone()
+            current_spend = spend_row["actual_spend"] if spend_row else 0.0
+            
+            return {
+                "total_resources": int(total_resources),
+                "total_savings": total_savings,
+                "current_spend": float(current_spend)
+            }

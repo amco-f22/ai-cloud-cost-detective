@@ -433,10 +433,48 @@ def scan_all_resources(region: str, progress_callback=None) -> dict:
             logger.error(f"Error scanning {name}: {e}")
             scan_results[name] = []
 
+    # Fetch actual spend for the last 30 days if possible
+    actual_spend_data = get_actual_spend()
+
     return {
         "region": region,
         "account_id": identity.get("Account", "unknown"),
         "total_resources": len(all_resources),
         "resources": all_resources,
         "breakdown": {k: len(v) for k, v in scan_results.items()},
+        "actual_spend_history": actual_spend_data,
     }
+
+def get_actual_spend() -> list[dict]:
+    """Fetch the last 30 days of unblended cost from AWS Cost Explorer."""
+    from datetime import datetime, timedelta
+    
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    data = _run_aws_cli([
+        "ce", "get-cost-and-usage",
+        "--time-period", f"Start={start_date},End={end_date}",
+        "--granularity", "DAILY",
+        "--metrics", "UnblendedCost"
+    ])
+    
+    if not data or "ResultsByTime" not in data:
+        logger.warning("Could not fetch Cost Explorer data. Make sure ce:GetCostAndUsage permission is enabled.")
+        return []
+        
+    history = []
+    for result in data["ResultsByTime"]:
+        date_str = result.get("TimePeriod", {}).get("Start", "")
+        amount_str = result.get("Total", {}).get("UnblendedCost", {}).get("Amount", "0")
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            amount = 0.0
+            
+        history.append({
+            "date": date_str,
+            "actual_spend": amount
+        })
+        
+    return history

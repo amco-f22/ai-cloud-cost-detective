@@ -18,7 +18,7 @@ from auth import get_current_user, hash_password, verify_password, create_token
 from aws_scanner import get_regions, scan_all_resources, get_caller_identity
 from cost_detector import detect_all_cost_flags
 from ai_analyzer import analyze_costs
-from db import init_db, close_pool, create_user, get_user_by_email, create_analysis, update_analysis, get_user_analyses, get_analysis_by_id
+from db import init_db, close_pool, create_user, get_user_by_email, create_analysis, update_analysis, get_user_analyses, get_analysis_by_id, get_spend_history, get_dashboard_stats
 from progress import progress_manager, ANALYSIS_STEPS
 
 # Load environment variables
@@ -29,6 +29,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+from scheduler import start_scheduler
+
 # ─── Lifespan ───
 
 @asynccontextmanager
@@ -37,8 +39,9 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         logger.info("Database initialized")
+        start_scheduler()
     except Exception as e:
-        logger.warning(f"Database initialization skipped: {e}")
+        logger.warning(f"Database/Scheduler initialization skipped: {e}")
     yield
     close_pool()
     logger.info("Shutdown complete")
@@ -124,6 +127,25 @@ async def login(req: LoginRequest):
 
 
 # ─── AWS Routes ───
+
+@app.get("/api/drift")
+async def fetch_drift(user: dict = Depends(get_current_user)):
+    """Fetch the drift history for the predicted vs actual spend chart."""
+    # For MVP, using default account. In prod, fetch per AWS account.
+    history = get_spend_history("default_account")
+    return history
+
+@app.get("/api/dashboard-stats")
+async def fetch_dashboard_stats(user: dict = Depends(get_current_user)):
+    """Fetch aggregated dashboard statistics."""
+    stats = get_dashboard_stats(user["user_id"])
+    return stats
+
+@app.get("/api/history/recent")
+async def fetch_recent_history(user: dict = Depends(get_current_user)):
+    """Fetch 5 most recent analyses."""
+    history = get_user_analyses(user["user_id"], limit=5)
+    return {"analyses": history}
 
 @app.get("/api/regions")
 async def list_regions(user: dict = Depends(get_current_user)):
@@ -235,6 +257,7 @@ async def _run_analysis_pipeline(analysis_id: int, region: str, user_id: int):
             resources_scanned=analysis_result.get("total_resources_scanned", 0),
             issues_found=analysis_result.get("total_issues_found", 0),
             estimated_savings=analysis_result.get("estimated_monthly_savings", ""),
+            predicted_monthly_spend=analysis_result.get("predicted_monthly_spend", 0.0),
             analysis_result=analysis_result,
             status="completed",
         )

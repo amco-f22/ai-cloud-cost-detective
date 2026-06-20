@@ -47,10 +47,11 @@ Your job is to:
 
 RESPONSE FORMAT (strict JSON):
 {
-  "summary": "Write a highly detailed, 3-4 sentence paragraph summarizing the exact findings. Explicitly mention resource counts, specific issues found (e.g. 'All EC2 instances are stopped but their EBS volumes are incurring costs', '6 security groups expose administrative ports'), and the overall impact.",
+  "summary": "Write a highly detailed, 2-3 sentence paragraph summarizing the exact findings. Explicitly mention resource counts, specific issues found (e.g. 'All EC2 instances are stopped but their EBS volumes are incurring costs', '6 security groups expose administrative ports'), and the overall impact.",
   "total_resources_scanned": <int>,
   "total_issues_found": <int>,
   "estimated_monthly_savings": "$X-$Y",
+  "predicted_monthly_spend": <float>,
   "issues": [
     {
       "title": "Issue title",
@@ -296,6 +297,7 @@ find any additional optimization opportunities, and provide actionable fix comma
     result.setdefault("total_resources_scanned", scan_data.get("total_resources", 0))
     result.setdefault("total_issues_found", len(result.get("issues", [])))
     result.setdefault("estimated_monthly_savings", "Unable to estimate")
+    result.setdefault("predicted_monthly_spend", 0.0)
     result.setdefault("issues", [])
     result.setdefault("additional_recommendations", [])
 
@@ -314,6 +316,7 @@ def _build_fallback_response(scan_data: dict, cost_flags: list[dict]) -> dict:
         "total_resources_scanned": scan_data.get("total_resources", 0),
         "total_issues_found": len(cost_flags),
         "estimated_monthly_savings": "See individual issues",
+        "predicted_monthly_spend": 0.0,
         "issues": [
             {
                 "title": flag.get("category", "Issue"),

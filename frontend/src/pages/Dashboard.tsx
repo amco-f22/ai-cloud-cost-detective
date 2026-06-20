@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ProgressTracker from '../components/ProgressTracker';
+import { DriftChart } from '../components/DriftChart';
+import { DashboardKPIs } from '../components/DashboardKPIs';
+import { RecentScansWidget } from '../components/RecentScansWidget';
 
 const API_URL = 'http://localhost:8000';
 const WS_URL = 'ws://localhost:8000';
@@ -208,6 +211,10 @@ export default function Dashboard({ token }: DashboardProps) {
         </p>
       </div>
 
+      <DashboardKPIs />
+
+      <DriftChart />
+
       <div className="dashboard-grid">
         {/* AWS Status Card */}
         <div className="card">
@@ -273,6 +280,10 @@ export default function Dashboard({ token }: DashboardProps) {
             )}
           </button>
         </div>
+      </div>
+
+      <div style={{ marginTop: '20px' }}>
+        <RecentScansWidget />
       </div>
 
       {error && (

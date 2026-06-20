@@ -137,6 +137,9 @@ Cloud architectures are incredibly dense. Analyzing raw JSON dumps from the AWS 
 
 ## ✨ Standout Features
 
+- **Continuous Drift Tracking:** A background `APScheduler` job that tracks the daily gap between your real AWS billed spend (via AWS Cost Explorer) and the AI's predicted savings, plotted on an interactive Area Chart.
+- **Executive KPI Dashboard:** Real-time metrics showing Current Monthly Spend, Total Savings Found across all history, and Total Resources Analyzed.
+- **Recent Scans Widget:** Quick access to the last 5 cloud scans right on the dashboard.
 - **Multi-threaded Scanning:** Fetches data across AWS services concurrently without blocking the server event loop.
 - **Live WebSocket Progress:** Keeps the user engaged by streaming fine-grained logs (e.g., "Scanning EC2 instances...") to the frontend in real-time.
 - **Analysis Timer:** Live UI timer tracking the duration of the scan and AI inference.
